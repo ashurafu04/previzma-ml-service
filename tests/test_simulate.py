@@ -35,7 +35,7 @@ def test_simulate_returns_result_with_camel_case_contract() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "resultValue": 2640.55,
-        "modelVersion": "mock-simulation-v1",
+        "modelVersion": "baseline-simulation-v1",
     }
 
 
@@ -66,5 +66,36 @@ def test_simulate_rejects_invalid_payload() -> None:
     assert body["receivedBody"] == payload
     assert any(
         error["loc"] == ["body", "salesHistory", 0, "amount"]
+        for error in body["validationErrors"]
+    )
+
+
+def test_simulate_rejects_unknown_scenario_type() -> None:
+    payload = simulation_payload()
+    payload["scenarioType"] = "UNKNOWN"
+
+    response = client.post("/simulate", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["message"] == "Request validation failed"
+    assert any(
+        error["loc"] == ["body", "scenarioType"] and error["type"] == "literal_error"
+        for error in body["validationErrors"]
+    )
+
+
+def test_simulate_rejects_change_below_minus_100() -> None:
+    payload = simulation_payload()
+    payload["inputChangePercent"] = -101
+
+    response = client.post("/simulate", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["message"] == "Request validation failed"
+    assert any(
+        error["loc"] == ["body", "inputChangePercent"]
+        and error["type"] == "greater_than_equal"
         for error in body["validationErrors"]
     )

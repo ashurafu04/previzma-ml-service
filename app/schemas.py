@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,7 +33,7 @@ class ForecastRequest(CamelModel):
     client_segment_id: int = Field(..., ge=1)
     client_segment_name: str = Field(..., min_length=1)
     client_segment_type: str = Field(..., min_length=1)
-    horizon: int = Field(..., ge=0)
+    horizon: int = Field(..., gt=0)
     calculation_date: date
     sales_history: list[SalesHistoryItem] = Field(default_factory=list)
 
@@ -53,8 +54,14 @@ class SimulationRequest(CamelModel):
     client_segment_id: int = Field(..., ge=1)
     client_segment_name: str = Field(..., min_length=1)
     client_segment_type: str = Field(..., min_length=1)
-    scenario_type: str = Field(..., min_length=1)
-    input_change_percent: float
+    scenario_type: Literal[
+        "PRICE_CHANGE",
+        "DEMAND_CHANGE",
+        "SUPPLY_DELAY",
+        "DISCOUNT_CAMPAIGN",
+    ]
+    input_change_percent: float = Field(..., ge=-100)
+    baseline_value: float | None = Field(default=None, ge=0)
     sales_history: list[SalesHistoryItem] = Field(default_factory=list)
 
 

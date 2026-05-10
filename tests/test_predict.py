@@ -36,9 +36,9 @@ def test_predict_returns_forecast_with_camel_case_contract() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body == {
-        "predictedValue": 72015.0,
-        "confidenceScore": 0.75,
-        "modelVersion": "mock-forecast-v1",
+        "predictedValue": 2400.5,
+        "confidenceScore": 0.18,
+        "modelVersion": "baseline-statistical-v1",
         "calculationDate": "2026-05-06",
     }
 
@@ -51,6 +51,7 @@ def test_predict_returns_zero_without_history() -> None:
 
     assert response.status_code == 200
     assert response.json()["predictedValue"] == 0.0
+    assert response.json()["confidenceScore"] == 0.0
 
 
 def test_predict_rejects_invalid_payload_with_diagnostics(caplog) -> None:
@@ -90,5 +91,20 @@ def test_predict_rejects_empty_body_with_diagnostics() -> None:
     assert body["receivedBody"] is None
     assert any(
         error["loc"] == ["body"] and error["type"] == "missing"
+        for error in body["validationErrors"]
+    )
+
+
+def test_predict_rejects_zero_horizon() -> None:
+    payload = forecast_payload()
+    payload["horizon"] = 0
+
+    response = client.post("/predict", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["message"] == "Request validation failed"
+    assert any(
+        error["loc"] == ["body", "horizon"] and error["type"] == "greater_than"
         for error in body["validationErrors"]
     )
