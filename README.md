@@ -10,6 +10,7 @@ FastAPI stays stateless: it never calls Spring Boot, never connects to Supabase,
 
 - `GET /health`
 - `POST /predict`
+- `POST /backtest`
 - `POST /simulate`
 
 OpenAPI documentation is available at:
@@ -88,6 +89,59 @@ All JSON fields use camelCase to match the existing Java Spring Boot client. Spr
 }
 ```
 
+### Backtest request
+
+`POST /backtest` evaluates the `baseline-statistical-v1` forecast on historical sales only. It simulates past forecast dates: for each cutoff date, the model trains on sales before the cutoff, predicts the next `horizon` days, and compares that prediction with the real sales observed in that period.
+
+FastAPI does not fetch missing history. If Spring Boot sends too little data, the service returns `testedSplits: 0`, null metrics, and `qualityLabel: "UNKNOWN"`.
+
+```json
+{
+  "horizon": 30,
+  "numberOfSplits": 6,
+  "salesHistory": [
+    {
+      "saleDate": "2024-01-10",
+      "quantity": 10,
+      "amount": 480000,
+      "confirmedOrder": true,
+      "sourceStatus": "CONFIRMED"
+    }
+  ]
+}
+```
+
+`POST /backtest` returns:
+
+```json
+{
+  "modelVersion": "baseline-statistical-v1",
+  "horizon": 30,
+  "testedSplits": 6,
+  "mae": 125000.0,
+  "mape": 8.7,
+  "rmse": 158000.0,
+  "qualityLabel": "GOOD",
+  "backtestWindows": [
+    {
+      "cutoffDate": "2025-10-01",
+      "prediction": 1200000.0,
+      "actual": 1100000.0,
+      "absoluteError": 100000.0,
+      "absolutePercentageError": 9.09
+    }
+  ]
+}
+```
+
+Quality labels are based on MAPE:
+
+- `EXCELLENT`: MAPE < 10
+- `GOOD`: MAPE < 20
+- `FAIR`: MAPE < 35
+- `POOR`: MAPE >= 35
+- `UNKNOWN`: not enough data or MAPE cannot be computed
+
 ### Simulation request
 
 `POST /simulate` accepts the same product and segment context. If `baselineValue` is present, the scenario is applied directly to it. Otherwise, the service computes a baseline from `salesHistory`.
@@ -146,6 +200,14 @@ The simulation baseline:
 - applies the requested scenario with `inputChangePercent`
 - returns `baselineValue`, `resultValue`, `impactValue`, and `impactPercent`
 - clamps negative results to `0.0`
+
+The backtest engine:
+
+- sorts historical sales by `saleDate`
+- selects several cutoff windows from the observed history
+- uses sales before each cutoff as training history
+- compares the forecast with actual revenue observed during the horizon
+- returns MAE, MAPE, RMSE, a quality label, and per-window diagnostics
 
 ## Model Limits
 

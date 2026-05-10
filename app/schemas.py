@@ -45,6 +45,31 @@ class ForecastResponse(CamelModel):
     calculation_date: date
 
 
+class BacktestRequest(CamelModel):
+    horizon: int = Field(..., gt=0)
+    sales_history: list[SalesHistoryItem] = Field(default_factory=list)
+    number_of_splits: int = Field(default=6, ge=1, le=12)
+
+
+class BacktestWindowResponse(CamelModel):
+    cutoff_date: date
+    prediction: float = Field(..., ge=0)
+    actual: float = Field(..., ge=0)
+    absolute_error: float = Field(..., ge=0)
+    absolute_percentage_error: float | None = Field(default=None, ge=0)
+
+
+class BacktestResponse(CamelModel):
+    model_version: str = Field(..., min_length=1)
+    horizon: int = Field(..., gt=0)
+    tested_splits: int = Field(..., ge=0)
+    mae: float | None = Field(default=None, ge=0)
+    mape: float | None = Field(default=None, ge=0)
+    rmse: float | None = Field(default=None, ge=0)
+    quality_label: Literal["EXCELLENT", "GOOD", "FAIR", "POOR", "UNKNOWN"]
+    backtest_windows: list[BacktestWindowResponse] = Field(default_factory=list)
+
+
 class SimulationRequest(CamelModel):
     company_id: int = Field(..., ge=1)
     user_id: int = Field(..., ge=1)

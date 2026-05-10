@@ -7,12 +7,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.schemas import (
+    BacktestRequest,
+    BacktestResponse,
     ForecastRequest,
     ForecastResponse,
     HealthResponse,
     SimulationRequest,
     SimulationResponse,
 )
+from app.services.backtest_service import run_backtest
 from app.services.forecast_service import predict_forecast
 from app.services.simulation_service import run_simulation
 
@@ -90,6 +93,11 @@ def health() -> HealthResponse:
 @app.post("/predict", response_model=ForecastResponse)
 def predict(request: ForecastRequest) -> ForecastResponse:
     return predict_forecast(request)
+
+
+@app.post("/backtest", response_model=BacktestResponse)
+def backtest(request: BacktestRequest) -> BacktestResponse:
+    return run_backtest(request)
 
 
 @app.post("/simulate", response_model=SimulationResponse)
