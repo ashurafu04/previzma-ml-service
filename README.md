@@ -120,7 +120,10 @@ Supported `scenarioType` values:
 
 ```json
 {
+  "baselineValue": 1000.0,
   "resultValue": 1100.0,
+  "impactValue": 100.0,
+  "impactPercent": 10.0,
   "modelVersion": "baseline-simulation-v1"
 }
 ```
@@ -141,6 +144,7 @@ The simulation baseline:
 - uses `baselineValue` when Spring Boot provides it
 - otherwise computes monthly baseline revenue from `salesHistory`
 - applies the requested scenario with `inputChangePercent`
+- returns `baselineValue`, `resultValue`, `impactValue`, and `impactPercent`
 - clamps negative results to `0.0`
 
 ## Model Limits

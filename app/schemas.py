@@ -66,5 +66,8 @@ class SimulationRequest(CamelModel):
 
 
 class SimulationResponse(CamelModel):
+    baseline_value: float = Field(..., ge=0)
     result_value: float = Field(..., ge=0)
+    impact_value: float
+    impact_percent: float
     model_version: str = Field(..., min_length=1)

@@ -20,9 +20,17 @@ def run_simulation(request: SimulationRequest) -> SimulationResponse:
         request.scenario_type,
         request.input_change_percent,
     )
+    result_value = max(result_value, 0.0)
+    impact_value = result_value - baseline_value
+    impact_percent = (
+        impact_value / baseline_value * 100 if baseline_value > 0 else 0.0
+    )
 
     return SimulationResponse(
-        result_value=round(max(result_value, 0.0), 2),
+        baseline_value=round(baseline_value, 2),
+        result_value=round(result_value, 2),
+        impact_value=round(impact_value, 2),
+        impact_percent=round(impact_percent, 4),
         model_version=MODEL_VERSION,
     )
 

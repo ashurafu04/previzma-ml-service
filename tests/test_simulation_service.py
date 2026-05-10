@@ -26,23 +26,35 @@ def simulation_request(
 def test_simulation_price_change_applies_percent_to_baseline_value() -> None:
     response = run_simulation(simulation_request("PRICE_CHANGE", 10.0))
 
+    assert response.baseline_value == 1000.0
     assert response.result_value == 1100.0
+    assert response.impact_value == 100.0
+    assert response.impact_percent == 10.0
     assert response.model_version == "baseline-simulation-v1"
 
 
 def test_simulation_demand_change_applies_percent_to_baseline_value() -> None:
     response = run_simulation(simulation_request("DEMAND_CHANGE", 15.0))
 
+    assert response.baseline_value == 1000.0
     assert response.result_value == 1150.0
+    assert response.impact_value == 150.0
+    assert response.impact_percent == 15.0
 
 
 def test_simulation_supply_delay_reduces_baseline_value() -> None:
     response = run_simulation(simulation_request("SUPPLY_DELAY", 20.0))
 
+    assert response.baseline_value == 1000.0
     assert response.result_value == 800.0
+    assert response.impact_value == -200.0
+    assert response.impact_percent == -20.0
 
 
 def test_simulation_discount_campaign_balances_price_drop_and_demand_uplift() -> None:
     response = run_simulation(simulation_request("DISCOUNT_CAMPAIGN", 10.0))
 
+    assert response.baseline_value == 1000.0
     assert response.result_value == 945.0
+    assert response.impact_value == -55.0
+    assert response.impact_percent == -5.5

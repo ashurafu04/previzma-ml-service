@@ -34,7 +34,10 @@ def test_simulate_returns_result_with_camel_case_contract() -> None:
 
     assert response.status_code == 200
     assert response.json() == {
+        "baselineValue": 2400.5,
         "resultValue": 2640.55,
+        "impactValue": 240.05,
+        "impactPercent": 10.0,
         "modelVersion": "baseline-simulation-v1",
     }
 
@@ -46,7 +49,10 @@ def test_simulate_returns_zero_without_history() -> None:
     response = client.post("/simulate", json=payload)
 
     assert response.status_code == 200
+    assert response.json()["baselineValue"] == 0.0
     assert response.json()["resultValue"] == 0.0
+    assert response.json()["impactValue"] == 0.0
+    assert response.json()["impactPercent"] == 0.0
 
 
 def test_simulate_rejects_invalid_payload() -> None:
