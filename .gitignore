@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 pytest-cache-files-*/
 uvicorn.*.log
+app/models/*.joblib
+app/models/model_metadata.json

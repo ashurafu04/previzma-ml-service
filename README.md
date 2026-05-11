@@ -2,7 +2,7 @@
 
 Stateless FastAPI microservice used by the Previzma Spring Boot backend for sales forecasts and What-If simulations.
 
-This service does not handle authentication, RBAC, tenants, users, CRUD, Supabase, PostgreSQL, or model training. It receives business-ready payloads from Spring Boot and returns a real statistical baseline computed from the provided sales history.
+This service does not handle authentication, RBAC, tenants, users, CRUD, Supabase, or PostgreSQL. It receives business-ready payloads from Spring Boot and returns either a trained offline forecast model prediction or a statistical baseline fallback computed from the provided sales history.
 
 FastAPI stays stateless: it never calls Spring Boot, never connects to Supabase, and never stores tenant data.
 
@@ -41,6 +41,20 @@ ML_PREDICT_PATH=/predict
 ML_SIMULATE_PATH=/simulate
 ```
 
+By default, runtime looks for:
+
+```text
+app/models/forecast_model.joblib
+app/models/model_metadata.json
+```
+
+You can override the artifact paths:
+
+```powershell
+$env:PREVIZMA_FORECAST_MODEL_PATH="C:\path\forecast_model.joblib"
+$env:PREVIZMA_FORECAST_METADATA_PATH="C:\path\model_metadata.json"
+```
+
 ## Test
 
 ```powershell
@@ -53,7 +67,7 @@ All JSON fields use camelCase to match the existing Java Spring Boot client. Spr
 
 ### Forecast request
 
-`POST /predict` receives product and segment context plus a positive forecast `horizon` in days. `salesHistory` can be empty, but the model will then return an explainable zero baseline with `confidenceScore` equal to `0.0`.
+`POST /predict` receives product and segment context plus a positive forecast `horizon` in days. If a trained model artifact is available and the request has enough history, FastAPI uses it. Otherwise it falls back to `baseline-statistical-v1`. `salesHistory` can be empty, but the fallback will then return an explainable zero baseline with `confidenceScore` equal to `0.0`.
 
 ```json
 {
@@ -91,7 +105,7 @@ All JSON fields use camelCase to match the existing Java Spring Boot client. Spr
 
 ### Backtest request
 
-`POST /backtest` evaluates the `baseline-statistical-v1` forecast on historical sales only. It simulates past forecast dates: for each cutoff date, the model trains on sales before the cutoff, predicts the next `horizon` days, and compares that prediction with the real sales observed in that period.
+`POST /backtest` evaluates the active forecast engine on historical sales only. It simulates past forecast dates: for each cutoff date, the model uses sales before the cutoff, predicts the next `horizon` days, and compares that prediction with the real sales observed in that period. If no trained artifact is available, `/backtest` uses `baseline-statistical-v1`.
 
 FastAPI does not fetch missing history. If Spring Boot sends too little data, the service returns `testedSplits: 0`, null metrics, and `qualityLabel: "UNKNOWN"`.
 
@@ -209,8 +223,66 @@ The backtest engine:
 - compares the forecast with actual revenue observed during the horizon
 - returns MAE, MAPE, RMSE, a quality label, and per-window diagnostics
 
+## Offline Training
+
+Training starts from a CSV export, not from a database connection. FastAPI never connects to Supabase.
+
+Expected CSV columns:
+
+```text
+saleDate,productId,productName,productSku,clientSegmentId,clientSegmentName,clientSegmentType,quantity,amount,confirmedOrder,sourceStatus
+```
+
+Example Supabase export query:
+
+```sql
+select
+  s.sale_date as "saleDate",
+  p.id as "productId",
+  p.name as "productName",
+  p.sku as "productSku",
+  cs.id as "clientSegmentId",
+  cs.name as "clientSegmentName",
+  cs.type as "clientSegmentType",
+  s.quantity as "quantity",
+  s.amount as "amount",
+  s.confirmed_order as "confirmedOrder",
+  s.source_status as "sourceStatus"
+from sales s
+join products p on p.id = s.product_id
+join client_segments cs on cs.id = s.client_segment_id
+where s.sale_date is not null;
+```
+
+Train the model:
+
+```powershell
+python -m app.training.train_model --input data/sales_export.csv --output app/models/forecast_model.joblib
+```
+
+The script:
+
+- ignores `CANCELLED` rows
+- creates supervised temporal windows for horizons `30`, `60`, and `90`
+- trains LightGBM when available
+- falls back to XGBoost, then scikit-learn HistGradientBoostingRegressor if needed
+- writes `forecast_model.joblib` and `model_metadata.json`
+- records validation MAE, MAPE, RMSE, training rows, algorithm, and model version
+
+Current trained model version with the recommended dependency path:
+
+```text
+lightgbm-window-v1
+```
+
+## Forecast Engines
+
+`baseline-statistical-v1` is transparent and deterministic. It is always available and is used when the trained artifact is missing or when a request has too little history.
+
+`lightgbm-window-v1` is trained offline from exported CSV data. It uses shared feature engineering for training and runtime prediction, including revenue windows, quantity windows, trend factor, recency, horizon, month, product SKU hash, and segment type hash.
+
 ## Model Limits
 
-This is a statistical baseline, not an XGBoost or LightGBM model. It is deterministic, transparent, and useful for integration and early product validation, but it does not learn seasonal effects, product interactions, macro signals, stock constraints, or customer-specific behavior.
+The LightGBM pipeline is a first production-shaped training path, but still V1. It uses historical sales windows only. It does not yet include external signals, inventory constraints, lead times, pricing tables, macro indicators, customer-level behavior, or automated model promotion.
 
-Next step: replace or complement this baseline with XGBoost/LightGBM, feature engineering, backtesting, and model evaluation metrics while keeping the existing `/predict` and `/simulate` contracts stable.
+Next step: enrich features, add stronger temporal validation, compare LightGBM vs XGBoost on real exports, and decide how Spring/Angular should expose model quality once this contract stabilizes.

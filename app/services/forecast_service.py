@@ -1,19 +1,21 @@
 from app.schemas import ForecastRequest, ForecastResponse
-from app.services.baseline import calculate_revenue_baseline, project_monthly_baseline
+from app.services.forecast_engine import BASELINE_MODEL_VERSION, forecast_revenue
 
-MODEL_VERSION = "baseline-statistical-v1"
+MODEL_VERSION = BASELINE_MODEL_VERSION
 
 
 def predict_forecast(request: ForecastRequest) -> ForecastResponse:
-    baseline = calculate_revenue_baseline(request.sales_history)
-    predicted_value = project_monthly_baseline(
-        monthly_value=baseline.monthly_value,
-        horizon_days=request.horizon,
+    prediction = forecast_revenue(
+        sales_history=request.sales_history,
+        horizon=request.horizon,
+        cutoff_date=request.calculation_date,
+        product_sku=request.product_sku,
+        client_segment_type=request.client_segment_type,
     )
 
     return ForecastResponse(
-        predicted_value=round(predicted_value, 2),
-        confidence_score=baseline.confidence_score,
-        model_version=MODEL_VERSION,
+        predicted_value=prediction.predicted_value,
+        confidence_score=prediction.confidence_score,
+        model_version=prediction.model_version,
         calculation_date=request.calculation_date,
     )
