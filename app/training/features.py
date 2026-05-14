@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.schemas import SalesHistoryItem
-from app.services.baseline import calculate_revenue_baseline
+from app.services.baseline import calculate_revenue_baseline, project_monthly_baseline
 
 FEATURE_NAMES = [
     "horizon",
@@ -22,6 +22,7 @@ FEATURE_NAMES = [
     "avg_order_amount",
     "recent_vs_old_revenue_ratio",
     "trend_factor",
+    "baseline_prediction",
     "days_since_last_sale",
     "product_sku_hash",
     "client_segment_type_hash",
@@ -58,7 +59,12 @@ def build_forecast_features(
         if older_revenue > 0
         else 1.0 if revenue_last_90d > 0 else 0.0
     )
-    trend_factor = calculate_revenue_baseline(history).trend_multiplier
+    baseline = calculate_revenue_baseline(history)
+    trend_factor = baseline.trend_multiplier
+    baseline_prediction = project_monthly_baseline(
+        monthly_value=baseline.monthly_value,
+        horizon_days=horizon,
+    )
     days_since_last_sale = (
         (cutoff_date - history[-1].sale_date).days if history else 9999
     )
@@ -78,6 +84,7 @@ def build_forecast_features(
         "avg_order_amount": float(avg_order_amount),
         "recent_vs_old_revenue_ratio": float(recent_vs_old_revenue_ratio),
         "trend_factor": float(trend_factor),
+        "baseline_prediction": float(baseline_prediction),
         "days_since_last_sale": float(max(days_since_last_sale, 0)),
         "product_sku_hash": _stable_hash(context.product_sku),
         "client_segment_type_hash": _stable_hash(context.client_segment_type),

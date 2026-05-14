@@ -35,6 +35,22 @@ def test_train_model_writes_artifact_and_metadata(tmp_path, monkeypatch) -> None
     assert metadata["trainingRows"] > 0
     assert metadata["validationMae"] >= 0
     assert metadata["validationRmse"] >= 0
+    assert metadata["targetStrategy"] in {
+        "raw",
+        "log1p",
+        "clipped_raw",
+        "clipped_log1p",
+        "baseline_ratio_log1p",
+        "clipped_baseline_ratio_log1p",
+    }
+    assert {candidate["targetStrategy"] for candidate in metadata["targetStrategyCandidates"]} == {
+        "raw",
+        "log1p",
+        "clipped_raw",
+        "clipped_log1p",
+        "baseline_ratio_log1p",
+        "clipped_baseline_ratio_log1p",
+    }
 
     monkeypatch.setenv(MODEL_PATH_ENV, str(output_path))
     clear_forecast_model_cache()

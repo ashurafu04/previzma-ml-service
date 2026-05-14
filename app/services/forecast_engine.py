@@ -28,6 +28,7 @@ def forecast_revenue(
     product_sku: str = "UNKNOWN",
     client_segment_type: str = "UNKNOWN",
     allow_model: bool = True,
+    require_promoted_model: bool = True,
 ) -> ForecastEngineResult:
     history = sorted(sales_history, key=lambda item: item.sale_date)
     baseline = calculate_revenue_baseline(history)
@@ -37,6 +38,7 @@ def forecast_revenue(
         model is not None
         and len(history) >= MIN_MODEL_HISTORY_POINTS
         and model.supports_horizon(horizon)
+        and (not require_promoted_model or model.is_model_promotable())
     ):
         features = build_forecast_features(
             sales_history=history,
@@ -51,7 +53,11 @@ def forecast_revenue(
             [[features[name] for name in model.feature_names]],
             columns=model.feature_names,
         )
-        prediction = max(float(model.model.predict(feature_row)[0]), 0.0)
+        transformed_prediction = float(model.model.predict(feature_row)[0])
+        prediction = model.inverse_transform_prediction(
+            transformed_prediction,
+            baseline_prediction=features.get("baseline_prediction"),
+        )
         return ForecastEngineResult(
             predicted_value=round(prediction, 2),
             confidence_score=_model_confidence_score(

@@ -11,6 +11,7 @@ FastAPI stays stateless: it never calls Spring Boot, never connects to Supabase,
 - `GET /health`
 - `POST /predict`
 - `POST /backtest`
+- `POST /model-comparison`
 - `POST /simulate`
 
 OpenAPI documentation is available at:
@@ -55,6 +56,26 @@ $env:PREVIZMA_FORECAST_MODEL_PATH="C:\path\forecast_model.joblib"
 $env:PREVIZMA_FORECAST_METADATA_PATH="C:\path\model_metadata.json"
 ```
 
+Model promotion is gated by validation MAPE. The default threshold is `10.0`,
+and can be overridden with:
+
+```powershell
+$env:PREVIZMA_MODEL_PROMOTION_MAPE_THRESHOLD="10.0"
+```
+
+If `validationMape` is missing, null, or above the threshold, `/predict` uses
+`baseline-statistical-v1` even when a trained artifact exists. Internal
+promotion statuses are `PROMOTED`, `NOT_PROMOTED`, `MISSING_METADATA`, and
+`MISSING_MODEL`.
+
+Offline training also compares target stabilization strategies before saving
+the artifact. The candidates are `raw`, `log1p`, `clipped_raw`,
+`clipped_log1p`, `baseline_ratio_log1p`, and
+`clipped_baseline_ratio_log1p`. Validation metrics are always computed against
+the real future revenue, not against clipped values. The selected
+`targetStrategy` and all `targetStrategyCandidates` are written to
+`model_metadata.json`.
+
 ## Test
 
 ```powershell
@@ -67,7 +88,7 @@ All JSON fields use camelCase to match the existing Java Spring Boot client. Spr
 
 ### Forecast request
 
-`POST /predict` receives product and segment context plus a positive forecast `horizon` in days. If a trained model artifact is available and the request has enough history, FastAPI uses it. Otherwise it falls back to `baseline-statistical-v1`. `salesHistory` can be empty, but the fallback will then return an explainable zero baseline with `confidenceScore` equal to `0.0`.
+`POST /predict` receives product and segment context plus a positive forecast `horizon` in days. If a trained model artifact is available, promoted by metadata, supports the requested horizon, and the request has enough history, FastAPI uses it. Otherwise it falls back to `baseline-statistical-v1`. `salesHistory` can be empty, but the fallback will then return an explainable zero baseline with `confidenceScore` equal to `0.0`.
 
 ```json
 {
@@ -156,6 +177,72 @@ Quality labels are based on MAPE:
 - `POOR`: MAPE >= 35
 - `UNKNOWN`: not enough data or MAPE cannot be computed
 
+### Model comparison request
+
+`POST /model-comparison` evaluates available forecast engines on the same
+backtest windows. This is useful before changing production behavior: it shows
+whether the trained model is actually better than the transparent baseline for
+the submitted `salesHistory`.
+
+The endpoint compares:
+
+- `baseline-statistical-v1`
+- `lightgbm-window-v1` when `forecast_model.joblib` is available and supports the requested horizon
+
+```json
+{
+  "horizon": 30,
+  "numberOfSplits": 6,
+  "salesHistory": [
+    {
+      "saleDate": "2024-01-10",
+      "quantity": 10,
+      "amount": 480000,
+      "confirmedOrder": true,
+      "sourceStatus": "CONFIRMED"
+    }
+  ]
+}
+```
+
+`POST /model-comparison` returns:
+
+```json
+{
+  "horizon": 30,
+  "numberOfSplits": 6,
+  "selectedModelVersion": "baseline-statistical-v1",
+  "selectionMetric": "MAPE",
+  "selectionReason": "baseline-statistical-v1 has lower MAPE than lightgbm-window-v1.",
+  "candidates": [
+    {
+      "modelVersion": "baseline-statistical-v1",
+      "testedSplits": 6,
+      "mae": 125000.0,
+      "mape": 8.7,
+      "rmse": 158000.0,
+      "qualityLabel": "GOOD"
+    },
+    {
+      "modelVersion": "lightgbm-window-v1",
+      "testedSplits": 6,
+      "mae": 200000.0,
+      "mape": 16.4,
+      "rmse": 240000.0,
+      "qualityLabel": "GOOD"
+    }
+  ]
+}
+```
+
+How to read it:
+
+- `candidates` contains one metric block per evaluated model.
+- `testedSplits` should match across candidates because they use the same cutoff windows.
+- `selectedModelVersion` is the currently recommended model for that history and horizon.
+- `selectionMetric` is usually `MAPE`; it becomes `RMSE` when MAPE cannot be computed, `FALLBACK` when no trained model is available, and `UNKNOWN` when no comparable metric exists.
+- `/predict` does not automatically switch strategy based on this endpoint yet. The comparison endpoint is intentionally advisory until product validation.
+
 ### Simulation request
 
 `POST /simulate` accepts the same product and segment context. If `baselineValue` is present, the scenario is applied directly to it. Otherwise, the service computes a baseline from `salesHistory`.
@@ -223,9 +310,32 @@ The backtest engine:
 - compares the forecast with actual revenue observed during the horizon
 - returns MAE, MAPE, RMSE, a quality label, and per-window diagnostics
 
+The model comparison engine:
+
+- reuses the same historical windows for every candidate
+- evaluates baseline and trained model candidates independently
+- selects the lower MAPE when possible
+- falls back to RMSE when MAPE is unavailable
+- keeps `/predict` behavior unchanged
+
 ## Offline Training
 
 Training starts from a CSV export, not from a database connection. FastAPI never connects to Supabase.
+
+For demo data, use the official data pipeline documented in [data/README.md](data/README.md):
+
+```text
+Kaggle Online Retail II
+  -> app.training.transform_kaggle_b2b
+  -> data/processed/products.csv
+  -> data/processed/client_segments.csv
+  -> data/processed/sales.csv
+  -> Supabase load
+  -> canonical sales_export.csv
+  -> train_model
+```
+
+Kaggle is raw material only. It must not become the business database.
 
 Expected CSV columns:
 
@@ -260,6 +370,12 @@ Train the model:
 python -m app.training.train_model --input data/sales_export.csv --output app/models/forecast_model.joblib
 ```
 
+Transform the Kaggle raw export into Previzma-compatible CSVs:
+
+```powershell
+python -m app.training.transform_kaggle_b2b --input data/raw/online_retail_II.csv --output-dir data/processed --max-output-rows 30000
+```
+
 The script:
 
 - ignores `CANCELLED` rows
@@ -268,6 +384,8 @@ The script:
 - falls back to XGBoost, then scikit-learn HistGradientBoostingRegressor if needed
 - writes `forecast_model.joblib` and `model_metadata.json`
 - records validation MAE, MAPE, RMSE, training rows, algorithm, and model version
+- compares target strategies `raw`, `log1p`, `clipped_raw`, `clipped_log1p`, `baseline_ratio_log1p`, and `clipped_baseline_ratio_log1p`
+- saves the selected `targetStrategy` plus all candidate metrics
 
 Current trained model version with the recommended dependency path:
 
@@ -280,6 +398,13 @@ lightgbm-window-v1
 `baseline-statistical-v1` is transparent and deterministic. It is always available and is used when the trained artifact is missing or when a request has too little history.
 
 `lightgbm-window-v1` is trained offline from exported CSV data. It uses shared feature engineering for training and runtime prediction, including revenue windows, quantity windows, trend factor, recency, horizon, month, product SKU hash, and segment type hash.
+
+Promotion rule:
+
+- `validationMape <= PREVIZMA_MODEL_PROMOTION_MAPE_THRESHOLD`: model can serve `/predict`
+- missing/null `validationMape`: fallback baseline
+- `validationMape` above threshold: fallback baseline
+- `/model-comparison` still evaluates non-promoted models for diagnosis
 
 ## Model Limits
 

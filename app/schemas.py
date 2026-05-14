@@ -70,6 +70,30 @@ class BacktestResponse(CamelModel):
     backtest_windows: list[BacktestWindowResponse] = Field(default_factory=list)
 
 
+class ModelComparisonRequest(CamelModel):
+    horizon: int = Field(..., gt=0)
+    sales_history: list[SalesHistoryItem] = Field(default_factory=list)
+    number_of_splits: int = Field(default=6, ge=1, le=12)
+
+
+class ModelCandidateResponse(CamelModel):
+    model_version: str = Field(..., min_length=1)
+    tested_splits: int = Field(..., ge=0)
+    mae: float | None = Field(default=None, ge=0)
+    mape: float | None = Field(default=None, ge=0)
+    rmse: float | None = Field(default=None, ge=0)
+    quality_label: Literal["EXCELLENT", "GOOD", "FAIR", "POOR", "UNKNOWN"]
+
+
+class ModelComparisonResponse(CamelModel):
+    horizon: int = Field(..., gt=0)
+    number_of_splits: int = Field(..., ge=1, le=12)
+    selected_model_version: str = Field(..., min_length=1)
+    selection_metric: Literal["MAPE", "RMSE", "FALLBACK", "UNKNOWN"]
+    selection_reason: str = Field(..., min_length=1)
+    candidates: list[ModelCandidateResponse] = Field(default_factory=list)
+
+
 class SimulationRequest(CamelModel):
     company_id: int = Field(..., ge=1)
     user_id: int = Field(..., ge=1)

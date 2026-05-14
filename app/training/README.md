@@ -37,6 +37,16 @@ Export the result as CSV and train locally:
 python -m app.training.train_model --input data/sales_export.csv --output app/models/forecast_model.joblib
 ```
 
+For Kaggle demo data, run the transformation first:
+
+```powershell
+python -m app.training.transform_kaggle_b2b --input data/raw/online_retail_II.csv --output-dir data/processed --max-output-rows 30000
+```
+
+Then load the generated `products.csv`, `client_segments.csv`, and `sales.csv`
+into Supabase, re-export the canonical ML CSV with real IDs, and train from that
+export.
+
 The script writes:
 
 - `app/models/forecast_model.joblib`
@@ -44,3 +54,20 @@ The script writes:
 
 If LightGBM is available, the model version is `lightgbm-window-v1`. Otherwise
 the script tries XGBoost, then scikit-learn HistGradientBoostingRegressor.
+
+The training script compares target stabilization strategies on the same
+temporal validation split:
+
+- `raw`: train directly on future revenue
+- `log1p`: train on `log1p(future revenue)`, then predict with `expm1`
+- `clipped_raw`: winsorize extreme targets before training
+- `clipped_log1p`: winsorize extreme targets, then train on `log1p`
+- `baseline_ratio_log1p`: train on `log1p(actual / baseline_prediction)`,
+  then multiply the inverse prediction by the statistical baseline
+- `clipped_baseline_ratio_log1p`: clip extreme baseline ratios before the
+  `log1p` transform
+
+Validation MAE, MAPE, and RMSE are always computed against the true, unmodified
+future revenue in MAD. The best strategy is selected by lowest validation MAPE,
+then RMSE. `model_metadata.json` records the selected `targetStrategy` and all
+`targetStrategyCandidates`.

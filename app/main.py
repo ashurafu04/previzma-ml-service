@@ -12,11 +12,14 @@ from app.schemas import (
     ForecastRequest,
     ForecastResponse,
     HealthResponse,
+    ModelComparisonRequest,
+    ModelComparisonResponse,
     SimulationRequest,
     SimulationResponse,
 )
 from app.services.backtest_service import run_backtest
 from app.services.forecast_service import predict_forecast
+from app.services.model_comparison_service import run_model_comparison
 from app.services.simulation_service import run_simulation
 
 logger = logging.getLogger("uvicorn.error")
@@ -98,6 +101,11 @@ def predict(request: ForecastRequest) -> ForecastResponse:
 @app.post("/backtest", response_model=BacktestResponse)
 def backtest(request: BacktestRequest) -> BacktestResponse:
     return run_backtest(request)
+
+
+@app.post("/model-comparison", response_model=ModelComparisonResponse)
+def model_comparison(request: ModelComparisonRequest) -> ModelComparisonResponse:
+    return run_model_comparison(request)
 
 
 @app.post("/simulate", response_model=SimulationResponse)

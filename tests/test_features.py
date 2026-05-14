@@ -45,5 +45,6 @@ def test_build_forecast_features_produces_stable_numeric_contract() -> None:
     assert features["quantity_total"] == 36.0
     assert features["quantity_last_30d"] == 14.0
     assert features["avg_order_amount"] == 1500.0
+    assert features["baseline_prediction"] > 0
     assert features["days_since_last_sale"] == 30.0
     assert len(feature_vector(features)) == len(FEATURE_NAMES)

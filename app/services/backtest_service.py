@@ -20,7 +20,9 @@ def run_backtest(request: BacktestRequest) -> BacktestResponse:
     history = _usable_sales_history(request.sales_history)
     trained_model = get_forecast_model()
     trained_model_available = (
-        trained_model is not None and trained_model.supports_horizon(request.horizon)
+        trained_model is not None
+        and trained_model.supports_horizon(request.horizon)
+        and trained_model.is_model_promotable()
     )
     minimum_history_points = (
         MIN_MODEL_HISTORY_POINTS if trained_model_available else 1

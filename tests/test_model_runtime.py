@@ -1,11 +1,19 @@
 import joblib
+from math import log1p
+
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services.model_registry import (
     MODEL_PATH_ENV,
+    MISSING_METADATA,
+    MISSING_MODEL,
+    NOT_PROMOTED,
+    PROMOTED,
+    PROMOTION_MAPE_THRESHOLD_ENV,
     clear_forecast_model_cache,
     get_forecast_model,
+    promotion_status,
 )
 from app.training.features import FEATURE_NAMES
 
@@ -57,17 +65,26 @@ def write_fixed_model(
     path,
     value: float = 4321.0,
     horizons_supported: list[int] | None = None,
+    validation_mape: float | None = 8.0,
+    include_validation_mape: bool = True,
+    target_strategy: str = "raw",
 ) -> None:
+    metadata = {
+        "modelVersion": "lightgbm-window-v1",
+        "horizonsSupported": horizons_supported or [30, 60, 90],
+        "featureNames": FEATURE_NAMES,
+        "targetStrategy": target_strategy,
+        "targetClipLower": None,
+        "targetClipUpper": None,
+    }
+    if include_validation_mape:
+        metadata["validationMape"] = validation_mape
+
     joblib.dump(
         {
             "model": FixedForecastModel(value),
             "featureNames": FEATURE_NAMES,
-            "metadata": {
-                "modelVersion": "lightgbm-window-v1",
-                "validationMape": 12.0,
-                "horizonsSupported": horizons_supported or [30, 60, 90],
-                "featureNames": FEATURE_NAMES,
-            },
+            "metadata": metadata,
         },
         path,
     )
@@ -86,6 +103,7 @@ def test_predict_falls_back_to_baseline_when_model_is_absent(
     body = response.json()
     assert body["modelVersion"] == "baseline-statistical-v1"
     assert body["predictedValue"] != 4321.0
+    assert promotion_status() == MISSING_MODEL
 
     clear_forecast_model_cache()
 
@@ -110,6 +128,85 @@ def test_predict_uses_trained_model_when_artifact_is_present(
     assert loaded_model is not None
     assert loaded_model.model.received_type == "DataFrame"
     assert loaded_model.model.received_columns == FEATURE_NAMES
+
+    clear_forecast_model_cache()
+
+
+def test_predict_inverse_transforms_log_target_strategy(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    model_path = tmp_path / "forecast_model.joblib"
+    write_fixed_model(model_path, value=log1p(4321.0), target_strategy="log1p")
+    monkeypatch.setenv(MODEL_PATH_ENV, str(model_path))
+    clear_forecast_model_cache()
+
+    response = client.post("/predict", json=forecast_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["predictedValue"] == 4321.0
+    assert body["modelVersion"] == "lightgbm-window-v1"
+
+    clear_forecast_model_cache()
+
+
+def test_predict_falls_back_when_model_metadata_has_no_validation_mape(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    model_path = tmp_path / "forecast_model.joblib"
+    write_fixed_model(model_path, include_validation_mape=False)
+    monkeypatch.setenv(MODEL_PATH_ENV, str(model_path))
+    clear_forecast_model_cache()
+
+    response = client.post("/predict", json=forecast_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["modelVersion"] == "baseline-statistical-v1"
+    assert promotion_status() == MISSING_METADATA
+
+    clear_forecast_model_cache()
+
+
+def test_predict_falls_back_when_model_validation_mape_is_above_threshold(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    model_path = tmp_path / "forecast_model.joblib"
+    write_fixed_model(model_path, validation_mape=21.49)
+    monkeypatch.setenv(MODEL_PATH_ENV, str(model_path))
+    clear_forecast_model_cache()
+
+    response = client.post("/predict", json=forecast_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["modelVersion"] == "baseline-statistical-v1"
+    assert body["predictedValue"] != 4321.0
+    assert promotion_status() == NOT_PROMOTED
+
+    clear_forecast_model_cache()
+
+
+def test_predict_uses_model_when_validation_mape_is_under_configured_threshold(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    model_path = tmp_path / "forecast_model.joblib"
+    write_fixed_model(model_path, validation_mape=12.0)
+    monkeypatch.setenv(MODEL_PATH_ENV, str(model_path))
+    monkeypatch.setenv(PROMOTION_MAPE_THRESHOLD_ENV, "15.0")
+    clear_forecast_model_cache()
+
+    response = client.post("/predict", json=forecast_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["predictedValue"] == 4321.0
+    assert body["modelVersion"] == "lightgbm-window-v1"
+    assert promotion_status() == PROMOTED
 
     clear_forecast_model_cache()
 
